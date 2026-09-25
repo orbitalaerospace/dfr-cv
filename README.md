@@ -34,6 +34,8 @@ We have separated the drone's capabilities into distinct modules found in `src/u
    Crops detected license plates and utilizes EasyOCR to read the plate text from the air.
 7. **Ground Gesture Recognition:** (`gesture_recognition.py`)
    Uses YOLO-Pose to interpret the body language of first responders on the ground to issue silent flight commands.
+8. **Obstacle Avoidance:** (`obstacle_avoidance.py`)
+   Calculates Time-To-Collision (TTC) by analyzing the rapid expansion of tracked bounding boxes to prevent crashes.
 
 ---
 
@@ -92,6 +94,11 @@ python src/use_cases/alpr.py
 **Run Ground Gesture Recognition:**
 ```bash
 python src/use_cases/gesture_recognition.py
+```
+
+**Run Obstacle Avoidance:**
+```bash
+python src/use_cases/obstacle_avoidance.py
 ```
 
 ### 4. Training (Optional)
