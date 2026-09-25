@@ -29,7 +29,52 @@ We have separated the drone's capabilities into distinct modules found in `src/u
 4. **Target Following / Gimbal Control:** (`target_following.py`) 
    Calculates the relative offset of a target from the camera center to issue pitch/yaw commands to the drone's gimbal.
 
+---
+
 ## Getting Started
-1. Install dependencies: `pip install -r requirements.txt`
-2. Download data: `python scripts/download_data.py`
-3. Train model: `python src/train.py`
+
+### 1. Installation
+```bash
+# Create and activate a virtual environment (Recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Download the VisDrone Dataset
+Ultralytics handles the download and conversion to YOLO format automatically. Run our helper script to trigger the download:
+```bash
+python scripts/download_data.py
+```
+*(Note: This downloads ~1.5GB of image data and labels into your datasets folder).*
+
+### 3. Running the Use Cases
+You can run each module locally to test it. By default, they will connect to your computer's webcam (camera index `0`). To exit a running module, press the **`q`** key on your keyboard.
+
+**Run Search and Rescue (SAR):**
+```bash
+python src/use_cases/search_and_rescue.py
+```
+
+**Run Vehicle Pursuit:**
+```bash
+python src/use_cases/vehicle_pursuit.py
+```
+
+**Run Crowd & Traffic Density:**
+```bash
+python src/use_cases/crowd_density.py
+```
+
+**Run Target Following:**
+```bash
+python src/use_cases/target_following.py
+```
+
+### 4. Training (Optional)
+If you want to train or fine-tune the YOLO model from scratch using the downloaded VisDrone dataset:
+```bash
+python src/train.py
+```
