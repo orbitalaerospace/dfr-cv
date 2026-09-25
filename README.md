@@ -101,8 +101,11 @@ python src/use_cases/gesture_recognition.py
 python src/use_cases/obstacle_avoidance.py
 ```
 
-### 4. Training (Optional)
+### 4. Training & Fine-Tuning
 If you want to train or fine-tune the YOLO model from scratch using the downloaded VisDrone dataset:
 ```bash
 python src/train.py
 ```
+
+**Want to train the drone to recognize custom objects (like Fire, Smoke, or License Plates)?** 
+Read our detailed **[Fine-Tuning Guide](docs/FINE_TUNING.md)** for step-by-step instructions on data formatting, custom YAML configurations, and exporting for edge hardware.
