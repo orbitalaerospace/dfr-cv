@@ -28,6 +28,8 @@ We have separated the drone's capabilities into distinct modules found in `src/u
    Analyzes frame population to estimate crowd sizes and identify traffic bottlenecks.
 4. **Target Following / Gimbal Control:** (`target_following.py`) 
    Calculates the relative offset of a target from the camera center to issue pitch/yaw commands to the drone's gimbal.
+5. **Wildfire & Smoke Detection:** (`fire_smoke_detection.py`) 
+   Provides early warning for natural disasters by identifying smoke plumes and active fire lines.
 
 ---
 
@@ -71,6 +73,11 @@ python src/use_cases/crowd_density.py
 **Run Target Following:**
 ```bash
 python src/use_cases/target_following.py
+```
+
+**Run Wildfire & Smoke Detection:**
+```bash
+python src/use_cases/fire_smoke_detection.py
 ```
 
 ### 4. Training (Optional)
