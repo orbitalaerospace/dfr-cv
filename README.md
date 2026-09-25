@@ -32,6 +32,8 @@ We have separated the drone's capabilities into distinct modules found in `src/u
    Provides early warning for natural disasters by identifying smoke plumes and active fire lines.
 6. **Automated License Plate Recognition (ALPR):** (`alpr.py`)
    Crops detected license plates and utilizes EasyOCR to read the plate text from the air.
+7. **Ground Gesture Recognition:** (`gesture_recognition.py`)
+   Uses YOLO-Pose to interpret the body language of first responders on the ground to issue silent flight commands.
 
 ---
 
@@ -85,6 +87,11 @@ python src/use_cases/fire_smoke_detection.py
 **Run ALPR (License Plate Recognition):**
 ```bash
 python src/use_cases/alpr.py
+```
+
+**Run Ground Gesture Recognition:**
+```bash
+python src/use_cases/gesture_recognition.py
 ```
 
 ### 4. Training (Optional)
