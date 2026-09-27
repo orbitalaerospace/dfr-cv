@@ -40,8 +40,9 @@ venv.bak/
 *.swp
 *.swo
 
-# Datasets / weights
+# Datasets / weights / outputs
 data/
+runs/
 models/*.pt
 models/*.onnx
 models/*.engine
