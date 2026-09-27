@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dfr-cv"
+version = "0.1.0"
+description = "Autonomous Aerial Incident Perception System"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Orbital Aerospace" }
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "numpy>=1.23.5",
+]
+
+[project.optional-dependencies]
+ml = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "ultralytics>=8.1.0",
+    "opencv-python>=4.8.0",
+    "PyYAML>=6.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

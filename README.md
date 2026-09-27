@@ -1,111 +1,155 @@
-# First Responder Drone - Computer Vision (dfr-cv)
+# Autonomous Aerial Incident Perception System (`dfr-cv`)
 
-This repository contains the computer vision module for a first responder drone, optimized for edge-hardware deployment.
+`dfr-cv` is an aerial computer vision system designed for autonomous first responder and search-and-rescue (SAR) drones. The system continuously observes the environment, detects and tracks subjects of interest, performs temporal behavior and persistence reasoning, and emits structured incident alerts to autonomy and command-and-control layers.
 
-## Dataset Information: VisDrone
-The models in this repository are fine-tuned using the **VisDrone Dataset**. VisDrone is specifically captured from drone-mounted cameras at various altitudes, angles, and lighting conditions, making it perfect for aerial computer vision. Unlike standard datasets taken from eye-level, this dataset prevents the AI from failing when looking top-down.
+> **System Scope & Boundary:**  
+> `dfr-cv` is strictly a **perception system**. It does **not** directly control drone flight dynamics, motor ESCs, PID stabilization loops, or low-level flight actuation. Downstream autonomy systems consume the structured incident alerts emitted by this pipeline.
 
-### Classes (10 categories)
-1. `pedestrian` (people walking/standing)
-2. `people` (dense crowds)
-3. `bicycle`
-4. `car`
-5. `van`
-6. `truck`
-7. `tricycle`
-8. `awning-tricycle`
-9. `bus`
-10. `motor` (motorcycles/scooters)
+---
 
-## Use Cases
-We have separated the drone's capabilities into distinct modules found in `src/use_cases/`:
+## Target Architecture
 
-1. **Search and Rescue (SAR):** (`search_and_rescue.py`) 
-   Hyper-focuses on detecting pedestrians/people from high altitudes to locate missing persons in disaster zones.
-2. **Vehicle Pursuit:** (`vehicle_pursuit.py`) 
-   Uses Multi-Object Tracking (ByteTrack) to lock onto and track fleeing vehicles (cars, vans, motors) across frames.
-3. **Crowd & Traffic Density:** (`crowd_density.py`) 
-   Analyzes frame population to estimate crowd sizes and identify traffic bottlenecks.
-4. **Target Following / Gimbal Control:** (`target_following.py`) 
-   Calculates the relative offset of a target from the camera center to issue pitch/yaw commands to the drone's gimbal.
-5. **Wildfire & Smoke Detection:** (`fire_smoke_detection.py`) 
-   Provides early warning for natural disasters by identifying smoke plumes and active fire lines.
-6. **Automated License Plate Recognition (ALPR):** (`alpr.py`)
-   Crops detected license plates and utilizes EasyOCR to read the plate text from the air.
-7. **Ground Gesture Recognition:** (`gesture_recognition.py`)
-   Uses YOLO-Pose to interpret the body language of first responders on the ground to issue silent flight commands.
-8. **Obstacle Avoidance:** (`obstacle_avoidance.py`)
-   Calculates Time-To-Collision (TTC) by analyzing the rapid expansion of tracked bounding boxes to prevent crashes.
+The production pipeline follows a decoupled, feed-forward perception architecture:
+
+```text
+Camera / Video Stream
+        │
+        ▼
+  Preprocessing (Letterboxing, Tensor Normalization)
+        │
+        ▼
+ Spatial Detector (High-Altitude Small Target Localization)
+        │
+        ▼
+Multi-Object Tracker (Motion-Compensated ByteTrack / BoT-SORT)
+        │
+        ▼
+Tracklet & Temporal Reasoning (Sliding Window Kinematics & Persistence)
+        │
+        ▼
+ Incident State Machine (Dual-Threshold Confidence Hysteresis)
+        │
+        ▼
+ Structured Incident JSON (Immutable Validated Payload)
+        │
+        ▼
+Autonomy / Mission Planner / Alert Bus
+```
+
+The first operational vertical slice focuses on **aerial water-surface perception** (swimmer and floater detection, persistent tracking across waves and sun glint, and potential drowning/distress identification) grounded on the **SeaDronesSee** benchmark dataset.
+
+---
+
+## Project Status: Milestone 1 Complete
+
+Development proceeds through gated, test-driven engineering milestones.
+
+### Milestone 1 — Foundation, Domain Models, and Data Contracts
+
+- **Status:** **COMPLETE**
+- **Objective:** Establish the clean, strongly typed internal language and data contracts of the system before introducing machine learning models or tracking algorithms.
+
+#### What is Implemented in Milestone 1:
+1. **Canonical Domain Enums (`src/domain/enums.py`):**
+   - `TargetClass`: `PERSON_SURFACE`, `SWIMMER`, `FLOATER`, `LIFE_JACKET`, `WATERCRAFT`, `UNKNOWN`.
+   - `TrackState`: `NEW`, `TRACKED`, `COASTING`, `LOST`.
+   - `IncidentStatus`: `DETECTED`, `CANDIDATE`, `CONFIRMED`, `RESOLVED`, `REJECTED`.
+   - `AlertSeverity`: `INFO`, `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+   - *Design rule:* 100% decoupled from ML frameworks and dataset-specific numeric class IDs.
+2. **Strict Pydantic Schemas (`src/schemas/`):**
+   - `BoundingBox`: Immutable pixel-space box enforcing $x_1 \ge 0$, $y_1 \ge 0$, $x_2 > x_1$, $y_2 > y_1$.
+   - `Detection`: Single-frame spatial detection with bounded confidence ($0.0 \le c \le 1.0$) and frame counters.
+   - `Tracklet`: Multi-frame object identity tracking contract with chronological timestamp validation.
+   - `UavTelemetry`: Optional drone attitude, altitude AGL, and GPS fix contract with physical range validation.
+   - `IncidentAlert`: Structured, serializable perception incident alert payload.
+3. **Serialization Utilities (`src/schemas/serialization.py`):**
+   - Type-safe, validated JSON/dict round-trip helpers with strict error handling.
+4. **Environment & Hardware Verification (`tools/verify_env.py`):**
+   - Cross-platform hardware diagnostics detecting Apple Silicon MPS, NVIDIA CUDA, and CPU fallback.
+5. **Clean Packaging (`pyproject.toml`):**
+   - Modern PEP 621 package metadata with separated core, ML, and test dependencies.
+6. **Unit Test Suite (`tests/unit/`):**
+   - 26 comprehensive unit tests validating bounds, immutability, schema rejection, and serialization fidelity.
+
+#### What is Intentionally NOT Implemented Yet:
+- Neural network weights and model architectures (Milestone 2).
+- Spatial detection inference loops (Milestone 2).
+- ByteTrack / BoT-SORT multi-object tracking logic (Milestone 3).
+- Temporal behavior reasoning and incident state machines (Milestone 4).
+- End-to-end video streaming pipelines and visual annotators (Milestone 5).
+- MAVLink, ROS2, or low-level flight control interfaces.
+
+*(Note: Legacy prototype scripts in `src/use_cases/` are preserved for historical reference and will be systematically deprecated in subsequent milestones).*
 
 ---
 
 ## Getting Started
 
-### 1. Installation
+### 1. Environment Setup
+
 ```bash
-# Create and activate a virtual environment (Recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Clone the repository
+git clone https://github.com/orbitalaerospace/dfr-cv.git
+cd dfr-cv
+
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Download the VisDrone Dataset
-Ultralytics handles the download and conversion to YOLO format automatically. Run our helper script to trigger the download:
-```bash
-python scripts/download_data.py
-```
-*(Note: This downloads ~1.5GB of image data and labels into your datasets folder).*
+### 2. Verify Hardware Acceleration
 
-### 3. Running the Use Cases
-You can run each module locally to test it. By default, they will connect to your computer's webcam (camera index `0`). To exit a running module, press the **`q`** key on your keyboard.
+Run the diagnostic utility to verify your compute backend (Apple Silicon MPS, NVIDIA CUDA, or CPU fallback):
 
-**Run Search and Rescue (SAR):**
 ```bash
-python src/use_cases/search_and_rescue.py
+python tools/verify_env.py
 ```
 
-**Run Vehicle Pursuit:**
-```bash
-python src/use_cases/vehicle_pursuit.py
+Expected output on Apple Silicon (M3):
+```text
+============================================================
+ Aerial Perception System — Environment Verification
+============================================================
+
+[Host Platform]
+  OS / Kernel   : macOS-...-arm64
+  Python Version: 3.13.x
+
+[PyTorch & Acceleration Backends]
+  PyTorch Version: 2.14.0
+  Apple Silicon MPS Available: True (Built: True)
+  NVIDIA CUDA Available      : False (Devices: 0)
+
+[Device Selection]
+  Active Compute Target: mps [Apple Silicon GPU Accelerated]
+============================================================
 ```
 
-**Run Crowd & Traffic Density:**
+### 3. Running Unit Tests
+
+Execute the Milestone 1 unit test suite:
+
 ```bash
-python src/use_cases/crowd_density.py
+python -m pytest tests/unit -v
 ```
 
-**Run Target Following:**
+Execute the full test suite (including legacy regression tests):
+
 ```bash
-python src/use_cases/target_following.py
+python -m pytest -v
 ```
 
-**Run Wildfire & Smoke Detection:**
-```bash
-python src/use_cases/fire_smoke_detection.py
-```
+---
 
-**Run ALPR (License Plate Recognition):**
-```bash
-python src/use_cases/alpr.py
-```
+## Roadmap
 
-**Run Ground Gesture Recognition:**
-```bash
-python src/use_cases/gesture_recognition.py
-```
-
-**Run Obstacle Avoidance:**
-```bash
-python src/use_cases/obstacle_avoidance.py
-```
-
-### 4. Training & Fine-Tuning
-If you want to train or fine-tune the YOLO model from scratch using the downloaded VisDrone dataset:
-```bash
-python src/train.py
-```
-
-**Want to train the drone to recognize custom objects (like Fire, Smoke, or License Plates)?** 
-Read our detailed **[Fine-Tuning Guide](docs/FINE_TUNING.md)** for step-by-step instructions on data formatting, custom YAML configurations, and exporting for edge hardware.
+| Milestone | Scope | Status |
+| :---: | :--- | :---: |
+| **M1** | **Foundation, Domain Models & Data Contracts** | **COMPLETED** |
+| **M2** | Baseline Spatial Detector & SeaDronesSee Training | *Pending* |
+| **M3** | Motion-Compensated Multi-Object Tracking Engine | *Pending* |
+| **M4** | Tracklet Temporal Reasoning & Incident State Machine | *Pending* |
+| **M5** | End-to-End Prerecorded Video Pipeline & 15-Point Test Matrix | *Pending* |
