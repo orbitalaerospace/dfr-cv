@@ -29,6 +29,17 @@ def test_missing_weights_raises_file_not_found():
         UltralyticsDetectorAdapter("non_existent_weights.pt")
 
 
+def test_coco_semantic_mapping_rules():
+    """Ensure generic COCO classes are mapped honestly to generic domain classes."""
+    # COCO class 0 ('person') MUST map to generic TargetClass.PERSON
+    assert DEFAULT_COCO_MAPPING[0] == TargetClass.PERSON
+    # COCO class 0 MUST NOT map to water-specific TargetClass.PERSON_SURFACE
+    assert DEFAULT_COCO_MAPPING[0] != TargetClass.PERSON_SURFACE
+
+    # COCO class 8 ('boat') maps to TargetClass.WATERCRAFT
+    assert DEFAULT_COCO_MAPPING[8] == TargetClass.WATERCRAFT
+
+
 def test_adapter_initialization():
     adapter = UltralyticsDetectorAdapter(
         weights_path="models/yolo11n.pt",
@@ -37,7 +48,29 @@ def test_adapter_initialization():
     )
     assert adapter.detector_name == "test_detector"
     assert TargetClass.WATERCRAFT in adapter.target_classes
-    assert TargetClass.PERSON_SURFACE in adapter.target_classes
+    assert TargetClass.PERSON in adapter.target_classes
+    # Generic COCO adapter must not claim water-specific classes in its default targets
+    assert TargetClass.PERSON_SURFACE not in adapter.target_classes
+    assert TargetClass.SWIMMER not in adapter.target_classes
+
+
+def test_unmapped_class_handling():
+    """Verify adapter policy for classes not in the canonical mapping."""
+    # filter_unmapped=True (default): unmapped classes are dropped
+    adapter_filtered = UltralyticsDetectorAdapter(
+        weights_path="models/yolo11n.pt",
+        class_mapping={0: TargetClass.PERSON},
+        filter_unmapped=True,
+    )
+    assert adapter_filtered.filter_unmapped is True
+
+    # filter_unmapped=False: unmapped classes fall back to TargetClass.UNKNOWN
+    adapter_unfiltered = UltralyticsDetectorAdapter(
+        weights_path="models/yolo11n.pt",
+        class_mapping={0: TargetClass.PERSON},
+        filter_unmapped=False,
+    )
+    assert adapter_unfiltered.filter_unmapped is False
 
 
 def test_detect_on_blank_frame_returns_empty_list():

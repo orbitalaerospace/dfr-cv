@@ -10,7 +10,8 @@ from src.schemas.detection import Detection
 
 # BGR Color map for distinct target classes
 CLASS_COLORS_BGR: Dict[TargetClass, Tuple[int, int, int]] = {
-    TargetClass.PERSON_SURFACE: (255, 165, 0),    # Cyan/Blue-Orange
+    TargetClass.PERSON: (255, 165, 0),            # Cyan/Blue-Orange (generic person)
+    TargetClass.PERSON_SURFACE: (255, 120, 0),    # Deep Cyan (water surface person)
     TargetClass.SWIMMER: (0, 140, 255),           # Deep Orange
     TargetClass.FLOATER: (0, 215, 255),           # Amber/Gold
     TargetClass.LIFE_JACKET: (203, 192, 255),     # Pink

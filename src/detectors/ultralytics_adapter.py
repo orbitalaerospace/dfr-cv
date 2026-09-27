@@ -15,10 +15,10 @@ from src.schemas.detection import BoundingBox, Detection
 
 
 # Default canonical mapping for standard 80-class COCO models
-# Class 0: person -> TargetClass.PERSON_SURFACE
+# Class 0: person -> TargetClass.PERSON (generic human, not water-specific)
 # Class 8: boat   -> TargetClass.WATERCRAFT
 DEFAULT_COCO_MAPPING: Dict[int, TargetClass] = {
-    0: TargetClass.PERSON_SURFACE,
+    0: TargetClass.PERSON,
     8: TargetClass.WATERCRAFT,
 }
 

@@ -11,6 +11,7 @@ from enum import Enum
 class TargetClass(str, Enum):
     """Canonical classes of objects relevant to aerial search and rescue."""
 
+    PERSON = "person"
     PERSON_SURFACE = "person_surface"
     SWIMMER = "swimmer"
     FLOATER = "floater"
