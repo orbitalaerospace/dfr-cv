@@ -118,6 +118,12 @@ class TemporalFeatures(BaseModel):
         ge=0.0,
         description="Peak image-space speed observed across any single interval (pixels/second)",
     )
+    median_speed_px_per_sec: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Median image-space speed observed across intervals (pixels/second)",
+    )
+
     mean_acceleration_px_per_sec2: float = Field(
         ...,
         ge=0.0,

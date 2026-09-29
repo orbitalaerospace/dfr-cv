@@ -1,8 +1,7 @@
-"""Pure analysis module for Tracklet temporal feature extraction and diagnostic reporting."""
-
-from datetime import datetime
+from datetime import datetime, timedelta
 import math
 from typing import List, Optional, Sequence, Tuple
+
 
 from src.domain.enums import TargetClass, TrackState
 from src.schemas.detection import Detection
@@ -188,9 +187,16 @@ def extract_temporal_features(
     if step_speeds:
         mean_speed_px_per_sec = sum(step_speeds) / len(step_speeds)
         max_speed_px_per_sec = max(step_speeds)
+        sorted_speeds = sorted(step_speeds)
+        n_s = len(sorted_speeds)
+        if n_s % 2 == 1:
+            median_speed_px_per_sec = sorted_speeds[n_s // 2]
+        else:
+            median_speed_px_per_sec = (sorted_speeds[n_s // 2 - 1] + sorted_speeds[n_s // 2]) / 2.0
     else:
         mean_speed_px_per_sec = 0.0
         max_speed_px_per_sec = 0.0
+        median_speed_px_per_sec = 0.0
 
     # Image-space acceleration magnitude: delta_speed / delta_time_midpoint
     if len(step_speeds) >= 2:
@@ -241,6 +247,7 @@ def extract_temporal_features(
         total_path_length_px=round(total_path_length_px, 2),
         mean_speed_px_per_sec=round(mean_speed_px_per_sec, 2),
         max_speed_px_per_sec=round(max_speed_px_per_sec, 2),
+        median_speed_px_per_sec=round(median_speed_px_per_sec, 2),
         mean_acceleration_px_per_sec2=round(mean_acceleration_px_per_sec2, 2),
         direction_change_count=direction_change_count,
         min_bbox_area_px2=round(min_bbox_area_px2, 1),
@@ -248,6 +255,53 @@ def extract_temporal_features(
         bbox_growth_ratio=round(bbox_growth_ratio, 2),
         mean_confidence=round(mean_confidence, 3),
     )
+
+
+def slice_tracklet_window(
+    tracklet: Tracklet,
+    window_seconds: float = 2.0,
+    end_timestamp: Optional[datetime] = None,
+    default_fps: float = 10.0,
+) -> Tracklet:
+    """Extract a temporal rolling sub-window from a Tracklet's observation history.
+
+    Args:
+        tracklet: Full-history domain Tracklet.
+        window_seconds: Temporal window span in seconds.
+        end_timestamp: Reference endpoint timestamp (defaults to latest observation timestamp).
+        default_fps: Video frame rate fallback when timestamps are uniform.
+
+    Returns:
+        New immutable Tracklet containing only observations within [end - window, end].
+    """
+    all_detections = _collect_chronological_detections(tracklet)
+    if not all_detections:
+        return tracklet
+
+    ref_time = end_timestamp or all_detections[-1].timestamp
+    t_start = all_detections[0].timestamp
+    total_delta_sec = (ref_time - t_start).total_seconds()
+
+    if total_delta_sec > 0.0:
+        cutoff = ref_time - timedelta(seconds=window_seconds)
+        window_dets = [d for d in all_detections if d.timestamp >= cutoff]
+    else:
+        # Fallback to frame windowing
+        window_frames = max(1, int(round(window_seconds * default_fps)))
+        window_dets = all_detections[-window_frames:]
+
+    if not window_dets:
+        window_dets = [all_detections[-1]]
+
+    return Tracklet(
+        track_id=tracklet.track_id,
+        state=tracklet.state,
+        current_detection=window_dets[-1],
+        first_seen_timestamp=window_dets[0].timestamp,
+        last_seen_timestamp=window_dets[-1].timestamp,
+        observation_history=tuple(window_dets),
+    )
+
 
 
 def format_track_diagnostics(features: TemporalFeatures) -> str:

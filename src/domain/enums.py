@@ -31,6 +31,15 @@ class TrackState(str, Enum):
     LOST = "lost"
 
 
+class BehaviorState(str, Enum):
+    """Behavioral assessment states for tracked targets."""
+
+    UNKNOWN = "unknown"
+    NORMAL = "normal"
+    DISTRESS_CANDIDATE = "distress_candidate"
+    DISTRESS_CONFIRMED = "distress_confirmed"
+
+
 class IncidentStatus(str, Enum):
     """Lifecycle states of an operational aerial incident."""
 

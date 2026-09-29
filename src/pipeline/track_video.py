@@ -7,13 +7,16 @@ import time
 from typing import Dict, List, Set
 import cv2
 
+from src.analysis.behavior_classifier import TemporalDistressClassifier
 from src.analysis.temporal_features import extract_temporal_features, format_track_diagnostics
 from src.detectors.ultralytics_adapter import UltralyticsDetectorAdapter
-from src.domain.enums import TargetClass, TrackState
+from src.domain.enums import BehaviorState, TargetClass, TrackState
+from src.schemas.behavior import BehaviorAssessment, BehaviorClassifierConfig
 from src.schemas.temporal_features import TemporalFeatureConfig, TemporalFeatures
 from src.schemas.tracking import Tracklet
 from src.tracking.byte_tracker import ByteTracker
 from src.visualization.annotator import draw_tracks
+
 
 
 def run_video_tracking(
@@ -32,8 +35,13 @@ def run_video_tracking(
     max_frames: int | None = None,
     diagnostics: bool = True,
     export_json: str | Path | None = None,
+    behavior_window: float = 2.0,
+    behavior_stride: float = 0.5,
+    distress_threshold: float = 0.55,
+    confirm_windows: int = 3,
+    recovery_windows: int = 3,
 ) -> int:
-    """Execute sequential detection and tracking on a video stream."""
+    """Execute sequential detection, tracking, and temporal behavior analysis on a video stream."""
     source = Path(source_path)
     output = Path(output_path)
 
@@ -64,6 +72,17 @@ def run_video_tracking(
         emit_unconfirmed=True,
     )
 
+    print(f"Initializing TemporalDistressClassifier (window={behavior_window}s, thresh={distress_threshold}, confirm={confirm_windows}w)...")
+    behavior_cfg = BehaviorClassifierConfig(
+        window_seconds=behavior_window,
+        stride_seconds=behavior_stride,
+        distress_threshold=distress_threshold,
+        confirm_windows=confirm_windows,
+        recovery_windows=recovery_windows,
+    )
+    behavior_classifier = TemporalDistressClassifier(config=behavior_cfg)
+
+
     cap = cv2.VideoCapture(str(source))
     if not cap.isOpened():
         print(f"Error: Could not open video file: {source}", file=sys.stderr)
@@ -83,6 +102,7 @@ def run_video_tracking(
     total_detections_count = 0
     all_seen_track_ids: Set[int] = set()
     latest_tracklets: Dict[int, Tracklet] = {}
+    latest_behaviors: Dict[int, BehaviorAssessment] = {}
     track_observations: Dict[int, int] = {}
     track_classes: Dict[int, TargetClass] = {}
     track_states_history: Dict[int, List[TrackState]] = {}
@@ -93,7 +113,7 @@ def run_video_tracking(
     track_latencies_ms: List[float] = []
     frame_latencies_ms: List[float] = []
 
-    print("\nProcessing sequential video stream (Capture -> Detect -> Track -> Render)...")
+    print("\nProcessing sequential video stream (Capture -> Detect -> Track -> Behavior -> Render)...")
     t_pipeline_start = time.perf_counter()
 
     try:
@@ -123,6 +143,13 @@ def run_video_tracking(
             trk_ms = (t_trk_1 - t_trk_0) * 1000.0
             track_latencies_ms.append(trk_ms)
 
+            # 3. Temporal Behavior Classification (Milestone 5)
+            frame_behaviors: Dict[int, BehaviorAssessment] = {}
+            for trk in tracklets:
+                assessment = behavior_classifier.update(trk, default_fps=fps, current_timestamp=now)
+                frame_behaviors[trk.track_id] = assessment
+                latest_behaviors[trk.track_id] = assessment
+
             t_frame_end = time.perf_counter()
             total_frame_ms = (t_frame_end - t_frame_start) * 1000.0
             frame_latencies_ms.append(total_frame_ms)
@@ -151,14 +178,15 @@ def run_video_tracking(
             if has_swimmer:
                 frames_with_swimmers += 1
 
-            # 3. Visualization
+            # 4. Visualization
             curr_fps = 1000.0 / total_frame_ms if total_frame_ms > 0 else 0.0
             header = (
                 f"Frame {frame_id:04d} | Tracks: {len(tracklets)} (All: {len(all_seen_track_ids)}) | "
                 f"Det: {det_ms:.1f}ms | Trk: {trk_ms:.2f}ms | {curr_fps:.1f} FPS"
             )
-            annotated = draw_tracks(frame, tracklets, header_text=header)
+            annotated = draw_tracks(frame, tracklets, behaviors=frame_behaviors, header_text=header)
             out.write(annotated)
+
 
             frame_id += 1
 
@@ -216,24 +244,57 @@ def run_video_tracking(
             print(format_track_diagnostics(feat))
             print()
 
-    if export_json and temporal_features_map:
+    # Milestone 5: Temporal Behavior Summary
+    distress_confirmed = [tid for tid, b in latest_behaviors.items() if b.state == BehaviorState.DISTRESS_CONFIRMED]
+    distress_candidate = [tid for tid, b in latest_behaviors.items() if b.state == BehaviorState.DISTRESS_CANDIDATE]
+    normal_swimmers = [
+        tid for tid, b in latest_behaviors.items()
+        if b.state == BehaviorState.NORMAL and b.target_class in (TargetClass.SWIMMER, TargetClass.PERSON, TargetClass.PERSON_SURFACE)
+    ]
+    unknown_swimmers = [
+        tid for tid, b in latest_behaviors.items()
+        if b.state == BehaviorState.UNKNOWN and b.target_class in (TargetClass.SWIMMER, TargetClass.PERSON, TargetClass.PERSON_SURFACE)
+    ]
+
+    print("\n" + "=" * 60)
+    print(" TEMPORAL BEHAVIOR ANALYSIS REPORT (MILESTONE 5)")
+    print("=" * 60)
+    print(f"  Swimmer Tracks Evaluated : {len(swimmer_tracks)}")
+    print(f"    - Distress Confirmed   : {len(distress_confirmed)} (IDs: {distress_confirmed})")
+    print(f"    - Distress Candidate   : {len(distress_candidate)} (IDs: {distress_candidate})")
+    print(f"    - Normal Swimming      : {len(normal_swimmers)} (IDs: {normal_swimmers})")
+    print(f"    - Unknown / Sparse     : {len(unknown_swimmers)} (IDs: {unknown_swimmers})")
+    print("\n  Track Behavior Details:")
+    for tid in sorted(latest_behaviors.keys()):
+        b = latest_behaviors[tid]
+        if b.target_class in (TargetClass.SWIMMER, TargetClass.PERSON, TargetClass.PERSON_SURFACE):
+            print(f"    Track #{tid:02d}: {b.state.value.upper():<18} | Distress Score: {b.distress_score:.2f} | Conf: {b.confidence:.2f}")
+            print(f"      Reason: {b.explanation}")
+    print("=" * 60)
+
+    if export_json and (temporal_features_map or latest_behaviors):
         export_p = Path(export_json)
         export_p.parent.mkdir(parents=True, exist_ok=True)
         dump_data = {
-            str(tid): feat.model_dump(mode="json")
-            for tid, feat in sorted(temporal_features_map.items())
+            str(tid): {
+                "track_id": tid,
+                "target_class": track_classes.get(tid, TargetClass.UNKNOWN).value,
+                "temporal_features": temporal_features_map[tid].model_dump(mode="json") if tid in temporal_features_map else None,
+                "behavior_assessment": latest_behaviors[tid].model_dump(mode="json") if tid in latest_behaviors else None,
+            }
+            for tid in sorted(all_seen_track_ids)
         }
         with open(export_p, "w", encoding="utf-8") as f:
             json.dump(dump_data, f, indent=2)
-        print(f"Track diagnostics JSON exported to: {export_p}")
+        print(f"Track diagnostics & behavior JSON exported to: {export_p}")
 
     return 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run sequential spatial detection and ByteTrack tracking on an aerial video")
+    parser = argparse.ArgumentParser(description="Run sequential spatial detection, ByteTrack tracking, and temporal behavior analysis on an aerial video")
     parser.add_argument("--source", type=str, required=True, help="Path to input video file")
-    parser.add_argument("--output", type=str, default="runs/m4/tracking.mp4", help="Path to save output video")
+    parser.add_argument("--output", type=str, default="runs/m5/tracking.mp4", help="Path to save output video")
     parser.add_argument("--weights", type=str, default="models/seadronessee-yolov8n.pt", help="Path to model weights")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, mps, cpu, cuda)")
@@ -246,7 +307,12 @@ def main() -> int:
     parser.add_argument("--max-frames", type=int, default=None, help="Optional frame limit")
     parser.add_argument("--diagnostics", action="store_true", default=True, help="Print track diagnostics summary")
     parser.add_argument("--no-diagnostics", dest="diagnostics", action="store_false", help="Disable track diagnostics")
-    parser.add_argument("--export-json", type=str, default=None, help="Path to save track diagnostics JSON")
+    parser.add_argument("--export-json", type=str, default=None, help="Path to save track diagnostics & behavior JSON")
+    parser.add_argument("--behavior-window", type=float, default=2.0, help="Rolling temporal window duration (seconds)")
+    parser.add_argument("--behavior-stride", type=float, default=0.5, help="Rolling temporal window stride (seconds)")
+    parser.add_argument("--distress-thresh", type=float, default=0.55, help="Distress behavior score threshold")
+    parser.add_argument("--confirm-windows", type=int, default=3, help="Consecutive windows to confirm distress")
+    parser.add_argument("--recovery-windows", type=int, default=3, help="Consecutive windows to de-escalate distress")
 
     args = parser.parse_args()
     return run_video_tracking(
@@ -265,9 +331,15 @@ def main() -> int:
         max_frames=args.max_frames,
         diagnostics=args.diagnostics,
         export_json=args.export_json,
+        behavior_window=args.behavior_window,
+        behavior_stride=args.behavior_stride,
+        distress_threshold=args.distress_thresh,
+        confirm_windows=args.confirm_windows,
+        recovery_windows=args.recovery_windows,
     )
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
