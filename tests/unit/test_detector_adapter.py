@@ -6,8 +6,10 @@ import numpy as np
 
 from src.detectors.ultralytics_adapter import (
     DEFAULT_COCO_MAPPING,
+    DEFAULT_SEADRONESSEE_MAPPING,
     UltralyticsDetectorAdapter,
     resolve_device,
+    resolve_model_class_mapping,
 )
 from src.domain.enums import TargetClass
 from src.schemas.detection import Detection
@@ -122,3 +124,95 @@ def test_detect_on_real_sample_returns_valid_schema():
         assert d.bbox.y1 >= 0.0
         assert d.bbox.x2 > d.bbox.x1
         assert d.bbox.y2 > d.bbox.y1
+
+
+def test_seadronessee_semantic_mapping_rules():
+    """Verify SeaDronesSee native class mappings to domain TargetClass enums."""
+    # Native class 0 ('swimmer') MUST map to TargetClass.SWIMMER
+    assert DEFAULT_SEADRONESSEE_MAPPING[0] == TargetClass.SWIMMER
+    # Native class 0 MUST NOT map to drowning or distress
+    assert DEFAULT_SEADRONESSEE_MAPPING[0] != TargetClass.PERSON_SURFACE
+
+    # Native class 1 ('boat') MUST map to TargetClass.WATERCRAFT
+    assert DEFAULT_SEADRONESSEE_MAPPING[1] == TargetClass.WATERCRAFT
+
+    # Native class 2 ('jetski') MUST map to TargetClass.WATERCRAFT
+    assert DEFAULT_SEADRONESSEE_MAPPING[2] == TargetClass.WATERCRAFT
+
+    # Native class 3 ('life_saving_appliances') MUST map to TargetClass.LIFE_SAVING_APPLIANCE
+    assert DEFAULT_SEADRONESSEE_MAPPING[3] == TargetClass.LIFE_SAVING_APPLIANCE
+
+    # Native class 4 ('buoy') MUST map to TargetClass.BUOY
+    assert DEFAULT_SEADRONESSEE_MAPPING[4] == TargetClass.BUOY
+
+
+def test_resolve_model_class_mapping_logic():
+    """Verify auto-detection of model ontology mappings from native class names."""
+    # Test SeaDronesSee model signatures
+    sds_names = {0: "swimmer", 1: "boat", 2: "jetski", 3: "life_saving_appliances", 4: "buoy"}
+    mapping_sds = resolve_model_class_mapping(sds_names)
+    assert mapping_sds[0] == TargetClass.SWIMMER
+    assert mapping_sds[1] == TargetClass.WATERCRAFT
+    assert mapping_sds[2] == TargetClass.WATERCRAFT
+    assert mapping_sds[3] == TargetClass.LIFE_SAVING_APPLIANCE
+    assert mapping_sds[4] == TargetClass.BUOY
+
+    # Test COCO model signatures
+    coco_names = {0: "person", 1: "bicycle", 8: "boat"}
+    mapping_coco = resolve_model_class_mapping(coco_names)
+    assert mapping_coco[0] == TargetClass.PERSON
+    assert mapping_coco[8] == TargetClass.WATERCRAFT
+
+    # Test unknown arbitrary class dictionary fallback
+    unknown_names = {0: "rocket", 1: "satellite"}
+    mapping_fallback = resolve_model_class_mapping(unknown_names)
+    assert mapping_fallback == DEFAULT_COCO_MAPPING
+
+
+def test_seadronessee_adapter_initialization():
+    """Verify SeaDronesSee adapter automatically configures domain classes."""
+    adapter = UltralyticsDetectorAdapter(
+        weights_path="models/seadronessee-yolov8n.pt",
+        conf_threshold=0.25,
+        detector_name="seadronessee_yolov8n",
+        device="cpu",
+    )
+    assert adapter.detector_name == "seadronessee_yolov8n"
+    assert TargetClass.SWIMMER in adapter.target_classes
+    assert TargetClass.WATERCRAFT in adapter.target_classes
+    assert TargetClass.BUOY in adapter.target_classes
+    assert TargetClass.LIFE_SAVING_APPLIANCE in adapter.target_classes
+    # Generic COCO person must not be present in SeaDronesSee target classes
+    assert TargetClass.PERSON not in adapter.target_classes
+
+
+def test_seadronessee_detect_on_real_samples():
+    """Verify real inference on both existing and unseen aerial images."""
+    import cv2
+
+    adapter = UltralyticsDetectorAdapter(
+        weights_path="models/seadronessee-yolov8n.pt",
+        conf_threshold=0.25,
+        device="cpu",
+        detector_name="sds_unit_test",
+    )
+
+    # 1. Existing aerial sample frame
+    img1 = cv2.imread("data/samples/aerial_water_frame0.jpg")
+    assert img1 is not None
+    dets1 = adapter.detect(img1, frame_id=0)
+    assert len(dets1) > 0
+    classes1 = {d.target_class for d in dets1}
+    assert TargetClass.WATERCRAFT in classes1
+    assert TargetClass.SWIMMER in classes1
+
+    # 2. Unseen aerial validation image
+    img2 = cv2.imread("data/samples/aerial_unseen_10416.jpg")
+    assert img2 is not None
+    dets2 = adapter.detect(img2, frame_id=1)
+    assert len(dets2) > 0
+    swimmer_dets = [d for d in dets2 if d.target_class == TargetClass.SWIMMER]
+    watercraft_dets = [d for d in dets2 if d.target_class == TargetClass.WATERCRAFT]
+    assert len(swimmer_dets) >= 4  # Unseen frame has multiple confirmed swimmers
+    assert len(watercraft_dets) >= 1  # Unseen frame has confirmed watercraft
+

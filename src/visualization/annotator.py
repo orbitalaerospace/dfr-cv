@@ -15,6 +15,8 @@ CLASS_COLORS_BGR: Dict[TargetClass, Tuple[int, int, int]] = {
     TargetClass.SWIMMER: (0, 140, 255),           # Deep Orange
     TargetClass.FLOATER: (0, 215, 255),           # Amber/Gold
     TargetClass.LIFE_JACKET: (203, 192, 255),     # Pink
+    TargetClass.LIFE_SAVING_APPLIANCE: (180, 105, 255),  # Violet
+    TargetClass.BUOY: (0, 255, 255),              # Yellow
     TargetClass.WATERCRAFT: (50, 205, 50),        # Lime Green
     TargetClass.UNKNOWN: (160, 160, 160),         # Gray
 }

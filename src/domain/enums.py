@@ -16,6 +16,8 @@ class TargetClass(str, Enum):
     SWIMMER = "swimmer"
     FLOATER = "floater"
     LIFE_JACKET = "life_jacket"
+    LIFE_SAVING_APPLIANCE = "life_saving_appliance"
+    BUOY = "buoy"
     WATERCRAFT = "watercraft"
     UNKNOWN = "unknown"
 

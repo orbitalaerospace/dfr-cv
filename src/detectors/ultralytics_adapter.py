@@ -22,6 +22,65 @@ DEFAULT_COCO_MAPPING: Dict[int, TargetClass] = {
     8: TargetClass.WATERCRAFT,
 }
 
+# Default canonical mapping for 5-class SeaDronesSee models
+# Native classes:
+# 0: swimmer               -> TargetClass.SWIMMER
+# 1: boat                  -> TargetClass.WATERCRAFT
+# 2: jetski                -> TargetClass.WATERCRAFT
+# 3: life_saving_appliances -> TargetClass.LIFE_SAVING_APPLIANCE
+# 4: buoy                  -> TargetClass.BUOY
+DEFAULT_SEADRONESSEE_MAPPING: Dict[int, TargetClass] = {
+    0: TargetClass.SWIMMER,
+    1: TargetClass.WATERCRAFT,
+    2: TargetClass.WATERCRAFT,
+    3: TargetClass.LIFE_SAVING_APPLIANCE,
+    4: TargetClass.BUOY,
+}
+
+
+def resolve_model_class_mapping(model_names: Dict[int, str]) -> Dict[int, TargetClass]:
+    """Auto-detect appropriate class mapping based on model native class names.
+
+    Args:
+        model_names: Dictionary of class IDs to class names from YOLO model.names.
+
+    Returns:
+        Canonical class mapping dictionary mapping integer class IDs to TargetClass enums.
+    """
+    names_lower = {int(idx): str(name).lower().strip() for idx, name in model_names.items()}
+
+    # Check for SeaDronesSee signature
+    if names_lower.get(0) == "swimmer" and names_lower.get(1) == "boat":
+        return dict(DEFAULT_SEADRONESSEE_MAPPING)
+
+    # Check for standard COCO signature
+    if names_lower.get(0) == "person" and names_lower.get(8) == "boat":
+        return dict(DEFAULT_COCO_MAPPING)
+
+    # Name-based mapping fallback
+    name_to_target = {
+        "swimmer": TargetClass.SWIMMER,
+        "boat": TargetClass.WATERCRAFT,
+        "jetski": TargetClass.WATERCRAFT,
+        "life_saving_appliances": TargetClass.LIFE_SAVING_APPLIANCE,
+        "life_saving_appliance": TargetClass.LIFE_SAVING_APPLIANCE,
+        "buoy": TargetClass.BUOY,
+        "person": TargetClass.PERSON,
+        "person_surface": TargetClass.PERSON_SURFACE,
+        "floater": TargetClass.FLOATER,
+        "life_jacket": TargetClass.LIFE_JACKET,
+        "watercraft": TargetClass.WATERCRAFT,
+    }
+    mapping: Dict[int, TargetClass] = {}
+    for idx, name in names_lower.items():
+        if name in name_to_target:
+            mapping[idx] = name_to_target[name]
+
+    if mapping:
+        return mapping
+
+    return dict(DEFAULT_COCO_MAPPING)
+
 
 def resolve_device(requested_device: str = "auto") -> str:
     """Resolve compute device string based on hardware availability."""
@@ -70,7 +129,7 @@ class UltralyticsDetectorAdapter(BaseDetector):
         if class_mapping is not None:
             self.class_mapping = dict(class_mapping)
         else:
-            self.class_mapping = dict(DEFAULT_COCO_MAPPING)
+            self.class_mapping = resolve_model_class_mapping(self.model.names)
 
         # Performance profiling store for the latest execution
         self.last_metrics: Dict[str, float] = {
