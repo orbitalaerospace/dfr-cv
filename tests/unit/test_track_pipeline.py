@@ -163,3 +163,193 @@ def test_real_detector_to_tracker_pipeline():
         assert isinstance(trk, Tracklet)
         assert trk.track_id > 0
         assert trk.current_detection.target_class in (TargetClass.SWIMMER, TargetClass.WATERCRAFT)
+
+
+def test_video_tracking_with_incident_alerts(tmp_path):
+    """Verify that run_video_tracking exports structured IncidentAlert JSONL logs."""
+    from src.pipeline.track_video import run_video_tracking
+    from src.schemas.incident import IncidentAlert
+
+    out_mp4 = tmp_path / "test_out.mp4"
+    out_json = tmp_path / "test_out.json"
+    out_alerts = tmp_path / "test_alerts.jsonl"
+
+    ret = run_video_tracking(
+        source_path="data/samples/simulated_distress_aerial.mp4",
+        output_path=out_mp4,
+        weights_path="models/seadronessee-yolov8n.pt",
+        conf_threshold=0.25,
+        device="cpu",
+        max_frames=15,
+        export_json=out_json,
+        export_alerts=out_alerts,
+    )
+    assert ret == 0
+    assert out_mp4.exists()
+    assert out_json.exists()
+    # At 15 frames with confirm_windows=3, distress may or may not reach confirmed, but alerts file is created
+    assert out_alerts.exists()
+
+
+def test_incident_lifecycle_tracker_deduplication_and_transitions():
+    """Verify deduplication of repeated confirmed frames, multi-track alerts, and re-confirmation."""
+    from src.domain.enums import AlertSeverity, BehaviorState, IncidentStatus, TargetClass
+    from src.pipeline.track_video import IncidentLifecycleTracker
+    from src.schemas.detection import BoundingBox
+
+    tracker = IncidentLifecycleTracker()
+    now = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
+    bbox = BoundingBox(x1=100.0, y1=100.0, x2=150.0, y2=150.0)
+
+    # 1. Track 1 enters DISTRESS_CONFIRMED -> initial alert emitted
+    alert1 = tracker.process_assessment(
+        track_id=1,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.DISTRESS_CONFIRMED,
+        confidence=0.85,
+        bbox=bbox,
+        frame_id=20,
+        timestamp=now,
+        fps=24.0,
+    )
+    assert alert1 is not None
+    assert alert1.incident_id == "INC-0001-000020"
+    assert alert1.incident_status == IncidentStatus.CONFIRMED
+    assert alert1.severity == AlertSeverity.CRITICAL
+    assert alert1.track_id == 1
+    assert alert1.frame_id == 20
+
+    # 2. Track 1 remains in DISTRESS_CONFIRMED on subsequent frames -> suppressed (deduplicated)
+    for f in range(21, 35):
+        dup = tracker.process_assessment(
+            track_id=1,
+            target_class=TargetClass.SWIMMER,
+            state=BehaviorState.DISTRESS_CONFIRMED,
+            confidence=0.88,
+            bbox=bbox,
+            frame_id=f,
+            timestamp=now,
+            fps=24.0,
+        )
+        assert dup is None, f"Frame {f} should not have emitted duplicate alert for Track 1"
+
+    # 3. Track 2 enters DISTRESS_CONFIRMED -> new distinct initial alert emitted
+    alert2 = tracker.process_assessment(
+        track_id=2,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.DISTRESS_CONFIRMED,
+        confidence=0.79,
+        bbox=bbox,
+        frame_id=30,
+        timestamp=now,
+        fps=24.0,
+    )
+    assert alert2 is not None
+    assert alert2.incident_id == "INC-0002-000030"
+    assert alert2.track_id == 2
+    assert alert2.incident_status == IncidentStatus.CONFIRMED
+
+    # 4. Track 1 de-escalates to NORMAL -> single RESOLVED alert with original incident_id
+    res_alert = tracker.process_assessment(
+        track_id=1,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.NORMAL,
+        confidence=0.90,
+        bbox=bbox,
+        frame_id=50,
+        timestamp=now,
+        fps=24.0,
+    )
+    assert res_alert is not None
+    assert res_alert.incident_id == "INC-0001-000020"
+    assert res_alert.incident_status == IncidentStatus.RESOLVED
+    assert res_alert.severity == AlertSeverity.INFO
+
+    # 5. Track 1 continues in NORMAL -> no further alerts
+    assert tracker.process_assessment(
+        track_id=1,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.NORMAL,
+        confidence=0.92,
+        bbox=bbox,
+        frame_id=51,
+        timestamp=now,
+        fps=24.0,
+    ) is None
+
+    # 6. Track 1 re-enters DISTRESS_CONFIRMED -> new distinct confirmation alert emitted
+    reconf_alert = tracker.process_assessment(
+        track_id=1,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.DISTRESS_CONFIRMED,
+        confidence=0.82,
+        bbox=bbox,
+        frame_id=70,
+        timestamp=now,
+        fps=24.0,
+    )
+    assert reconf_alert is not None
+    assert reconf_alert.incident_id == "INC-0001-000070"
+    assert reconf_alert.incident_status == IncidentStatus.CONFIRMED
+    assert reconf_alert.track_id == 1
+
+
+def test_incident_lifecycle_tracker_normal_swimming_zero_alerts():
+    """Verify normal swimming and non-swimmer targets emit zero alerts."""
+    from src.domain.enums import BehaviorState, TargetClass
+    from src.pipeline.track_video import IncidentLifecycleTracker
+    from src.schemas.detection import BoundingBox
+
+    tracker = IncidentLifecycleTracker()
+    now = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
+    bbox = BoundingBox(x1=200.0, y1=200.0, x2=250.0, y2=250.0)
+
+    # Normal swimmer over 50 consecutive frames
+    for f in range(50):
+        alert = tracker.process_assessment(
+            track_id=3,
+            target_class=TargetClass.SWIMMER,
+            state=BehaviorState.NORMAL,
+            confidence=0.85,
+            bbox=bbox,
+            frame_id=f,
+            timestamp=now,
+            fps=24.0,
+        )
+        assert alert is None
+
+    # Candidate and unknown states emit zero alerts
+    assert tracker.process_assessment(
+        track_id=3,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.DISTRESS_CANDIDATE,
+        confidence=0.60,
+        bbox=bbox,
+        frame_id=51,
+        timestamp=now,
+        fps=24.0,
+    ) is None
+
+    assert tracker.process_assessment(
+        track_id=3,
+        target_class=TargetClass.SWIMMER,
+        state=BehaviorState.UNKNOWN,
+        confidence=0.30,
+        bbox=bbox,
+        frame_id=52,
+        timestamp=now,
+        fps=24.0,
+    ) is None
+
+    # Non-swimmer target (boat) even if marked confirmed distress emits zero alerts
+    assert tracker.process_assessment(
+        track_id=4,
+        target_class=TargetClass.WATERCRAFT,
+        state=BehaviorState.DISTRESS_CONFIRMED,
+        confidence=0.95,
+        bbox=bbox,
+        frame_id=53,
+        timestamp=now,
+        fps=24.0,
+    ) is None
+

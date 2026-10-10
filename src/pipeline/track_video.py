@@ -4,19 +4,84 @@ import json
 from pathlib import Path
 import sys
 import time
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 import cv2
 
 from src.analysis.behavior_classifier import TemporalDistressClassifier
 from src.analysis.temporal_features import extract_temporal_features, format_track_diagnostics
 from src.detectors.ultralytics_adapter import UltralyticsDetectorAdapter
-from src.domain.enums import BehaviorState, TargetClass, TrackState
+from src.domain.enums import AlertSeverity, BehaviorState, IncidentStatus, TargetClass, TrackState
 from src.schemas.behavior import BehaviorAssessment, BehaviorClassifierConfig
+from src.schemas.detection import BoundingBox
+from src.schemas.incident import IncidentAlert
 from src.schemas.temporal_features import TemporalFeatureConfig, TemporalFeatures
 from src.schemas.tracking import Tracklet
 from src.tracking.byte_tracker import ByteTracker
 from src.visualization.annotator import draw_tracks
 
+
+
+class IncidentLifecycleTracker:
+    """Manages lifecycle transitions, deduplication, and resolution for incident alerts."""
+
+    def __init__(self) -> None:
+        self.active_incident_ids: Dict[int, str] = {}
+
+    def process_assessment(
+        self,
+        track_id: int,
+        target_class: TargetClass,
+        state: BehaviorState,
+        confidence: float,
+        bbox: Optional[BoundingBox],
+        frame_id: int,
+        timestamp: datetime,
+        fps: float = 25.0,
+    ) -> Optional[IncidentAlert]:
+        """Evaluate state transition for a track and emit an alert if transition is significant."""
+        is_swimmer = target_class in (TargetClass.SWIMMER, TargetClass.PERSON, TargetClass.PERSON_SURFACE)
+        if not is_swimmer:
+            return None
+
+        # 1. Initial distress confirmation
+        if state == BehaviorState.DISTRESS_CONFIRMED:
+            if track_id not in self.active_incident_ids:
+                inc_id = f"INC-{track_id:04d}-{frame_id:06d}"
+                self.active_incident_ids[track_id] = inc_id
+                return IncidentAlert(
+                    incident_id=inc_id,
+                    timestamp=timestamp,
+                    frame_id=frame_id,
+                    video_time_sec=round(frame_id / max(1e-3, fps), 3),
+                    incident_status=IncidentStatus.CONFIRMED,
+                    target_class=target_class,
+                    severity=AlertSeverity.CRITICAL,
+                    confidence=confidence,
+                    track_id=track_id,
+                    bbox=bbox,
+                    recommended_action="DISPATCH_SAR_HOVER_AND_MAINTAIN_VISUAL",
+                )
+            # Already active: suppress duplicate frame snapshots
+            return None
+
+        # 2. De-escalation / resolution after confirmed distress
+        elif state == BehaviorState.NORMAL and track_id in self.active_incident_ids:
+            inc_id = self.active_incident_ids.pop(track_id)
+            return IncidentAlert(
+                incident_id=inc_id,
+                timestamp=timestamp,
+                frame_id=frame_id,
+                video_time_sec=round(frame_id / max(1e-3, fps), 3),
+                incident_status=IncidentStatus.RESOLVED,
+                target_class=target_class,
+                severity=AlertSeverity.INFO,
+                confidence=confidence,
+                track_id=track_id,
+                bbox=bbox,
+                recommended_action="STAND_DOWN_MONITOR_AREA",
+            )
+
+        return None
 
 
 def run_video_tracking(
@@ -35,6 +100,7 @@ def run_video_tracking(
     max_frames: int | None = None,
     diagnostics: bool = True,
     export_json: str | Path | None = None,
+    export_alerts: str | Path | None = None,
     behavior_window: float = 2.0,
     behavior_stride: float = 0.5,
     distress_threshold: float = 0.55,
@@ -112,6 +178,14 @@ def run_video_tracking(
     det_latencies_ms: List[float] = []
     track_latencies_ms: List[float] = []
     frame_latencies_ms: List[float] = []
+    emitted_alerts: List[IncidentAlert] = []
+    lifecycle_tracker = IncidentLifecycleTracker()
+
+    alert_fp = None
+    if export_alerts:
+        alert_path = Path(export_alerts)
+        alert_path.parent.mkdir(parents=True, exist_ok=True)
+        alert_fp = open(alert_path, "w", encoding="utf-8")
 
     print("\nProcessing sequential video stream (Capture -> Detect -> Track -> Behavior -> Render)...")
     t_pipeline_start = time.perf_counter()
@@ -149,6 +223,23 @@ def run_video_tracking(
                 assessment = behavior_classifier.update(trk, default_fps=fps, current_timestamp=now)
                 frame_behaviors[trk.track_id] = assessment
                 latest_behaviors[trk.track_id] = assessment
+
+                # State-transition incident alert lifecycle
+                alert = lifecycle_tracker.process_assessment(
+                    track_id=trk.track_id,
+                    target_class=trk.current_detection.target_class,
+                    state=assessment.state,
+                    confidence=assessment.confidence,
+                    bbox=trk.current_detection.bbox,
+                    frame_id=frame_id,
+                    timestamp=now,
+                    fps=fps,
+                )
+                if alert is not None:
+                    emitted_alerts.append(alert)
+                    if alert_fp is not None:
+                        alert_fp.write(alert.model_dump_json() + "\n")
+                        alert_fp.flush()
 
             t_frame_end = time.perf_counter()
             total_frame_ms = (t_frame_end - t_frame_start) * 1000.0
@@ -193,6 +284,8 @@ def run_video_tracking(
     finally:
         cap.release()
         out.release()
+        if alert_fp is not None:
+            alert_fp.close()
 
     t_pipeline_end = time.perf_counter()
     total_time_sec = t_pipeline_end - t_pipeline_start
@@ -264,6 +357,7 @@ def run_video_tracking(
     print(f"    - Distress Candidate   : {len(distress_candidate)} (IDs: {distress_candidate})")
     print(f"    - Normal Swimming      : {len(normal_swimmers)} (IDs: {normal_swimmers})")
     print(f"    - Unknown / Sparse     : {len(unknown_swimmers)} (IDs: {unknown_swimmers})")
+    print(f"    - Incident Alerts Sent : {len(emitted_alerts)}")
     print("\n  Track Behavior Details:")
     for tid in sorted(latest_behaviors.keys()):
         b = latest_behaviors[tid]
@@ -288,6 +382,9 @@ def run_video_tracking(
             json.dump(dump_data, f, indent=2)
         print(f"Track diagnostics & behavior JSON exported to: {export_p}")
 
+    if export_alerts:
+        print(f"Structured incident alerts (JSONL) exported to: {export_alerts}")
+
     return 0
 
 
@@ -308,6 +405,7 @@ def main() -> int:
     parser.add_argument("--diagnostics", action="store_true", default=True, help="Print track diagnostics summary")
     parser.add_argument("--no-diagnostics", dest="diagnostics", action="store_false", help="Disable track diagnostics")
     parser.add_argument("--export-json", type=str, default=None, help="Path to save track diagnostics & behavior JSON")
+    parser.add_argument("--export-alerts", type=str, default=None, help="Path to save structured incident alerts (JSONL)")
     parser.add_argument("--behavior-window", type=float, default=2.0, help="Rolling temporal window duration (seconds)")
     parser.add_argument("--behavior-stride", type=float, default=0.5, help="Rolling temporal window stride (seconds)")
     parser.add_argument("--distress-thresh", type=float, default=0.55, help="Distress behavior score threshold")
@@ -331,6 +429,7 @@ def main() -> int:
         max_frames=args.max_frames,
         diagnostics=args.diagnostics,
         export_json=args.export_json,
+        export_alerts=args.export_alerts,
         behavior_window=args.behavior_window,
         behavior_stride=args.behavior_stride,
         distress_threshold=args.distress_thresh,
