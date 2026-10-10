@@ -216,3 +216,24 @@ def test_seadronessee_detect_on_real_samples():
     assert len(swimmer_dets) >= 4  # Unseen frame has multiple confirmed swimmers
     assert len(watercraft_dets) >= 1  # Unseen frame has confirmed watercraft
 
+
+def test_seadronessee_classes_filter():
+    """Verify that specifying classes=[0] restricts detections strictly to swimmer."""
+    import cv2
+
+    adapter = UltralyticsDetectorAdapter(
+        weights_path="models/seadronessee-yolov8n.pt",
+        conf_threshold=0.25,
+        classes=[0],
+        device="cpu",
+        detector_name="sds_filter_test",
+    )
+    assert adapter.classes == [0]
+
+    img = cv2.imread("data/samples/aerial_water_frame0.jpg")
+    assert img is not None
+    dets = adapter.detect(img, frame_id=0)
+    for d in dets:
+        assert d.target_class == TargetClass.SWIMMER
+
+

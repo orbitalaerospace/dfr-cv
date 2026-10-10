@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 from ultralytics import YOLO
@@ -111,6 +111,8 @@ class UltralyticsDetectorAdapter(BaseDetector):
         class_mapping: Optional[Dict[int, TargetClass]] = None,
         filter_unmapped: bool = True,
         detector_name: str = "generic_detector_pipeline_validation",
+        classes: Optional[List[int]] = None,
+        imgsz: Optional[int] = None,
     ) -> None:
         self.weights_path = Path(weights_path)
         if not self.weights_path.exists():
@@ -121,6 +123,8 @@ class UltralyticsDetectorAdapter(BaseDetector):
         self.device = resolve_device(device)
         self.filter_unmapped = filter_unmapped
         self._detector_name = detector_name
+        self.classes = list(classes) if classes is not None else None
+        self.imgsz = imgsz
 
         # Initialize model
         self.model = YOLO(str(self.weights_path))
@@ -162,13 +166,18 @@ class UltralyticsDetectorAdapter(BaseDetector):
         t_start = time.perf_counter()
 
         # Run inference via Ultralytics engine
-        results = self.model.predict(
-            source=image,
-            conf=self.conf_threshold,
-            iou=self.iou_threshold,
-            device=self.device,
-            verbose=False,
-        )
+        predict_kwargs: Dict[str, Any] = {
+            "source": image,
+            "conf": self.conf_threshold,
+            "iou": self.iou_threshold,
+            "classes": self.classes,
+            "device": self.device,
+            "verbose": False,
+        }
+        if self.imgsz is not None:
+            predict_kwargs["imgsz"] = self.imgsz
+
+        results = self.model.predict(**predict_kwargs)
 
         t_end = time.perf_counter()
         self.last_metrics["total_ms"] = (t_end - t_start) * 1000.0

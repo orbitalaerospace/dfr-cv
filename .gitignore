@@ -40,6 +40,9 @@ venv.bak/
 *.swp
 *.swo
 
+# macOS
+.DS_Store
+
 # Datasets / weights / outputs
 data/
 runs/
