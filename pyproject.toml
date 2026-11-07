@@ -23,6 +23,7 @@ ml = [
     "torchvision>=0.15.0",
     "ultralytics>=8.1.0",
     "opencv-python>=4.8.0",
+    "scipy>=1.10.0",
     "PyYAML>=6.0",
 ]
 test = [

@@ -84,13 +84,26 @@ class IncidentLifecycleTracker:
         return None
 
 
+SUPPORTED_DETECTORS: Dict[str, Dict[str, str]] = {
+    "seadronessee": {
+        "weights": "models/seadronessee-yolov8n.pt",
+        "name": "seadronessee_yolov8n",
+    },
+    "yolo11n": {
+        "weights": "models/yolo11n.pt",
+        "name": "yolo11n_coco",
+    },
+}
+
+
 def run_video_tracking(
     source_path: str | Path,
     output_path: str | Path,
-    weights_path: str | Path = "models/seadronessee-yolov8n.pt",
+    weights_path: str | Path | None = None,
     conf_threshold: float = 0.25,
     device: str = "auto",
-    detector_name: str = "seadronessee_yolov8n",
+    detector_name: Optional[str] = None,
+    detector: str = "seadronessee",
     high_threshold: float = 0.4,
     low_threshold: float = 0.1,
     match_threshold_high: float = 0.8,
@@ -108,6 +121,16 @@ def run_video_tracking(
     recovery_windows: int = 3,
 ) -> int:
     """Execute sequential detection, tracking, and temporal behavior analysis on a video stream."""
+    detector_key = str(detector).lower().strip()
+    if detector_key not in SUPPORTED_DETECTORS:
+        raise ValueError(
+            f"Unsupported detector '{detector}'. Supported detectors: {list(SUPPORTED_DETECTORS.keys())}"
+        )
+
+    det_cfg = SUPPORTED_DETECTORS[detector_key]
+    resolved_weights = Path(weights_path) if weights_path is not None else Path(det_cfg["weights"])
+    resolved_name = detector_name if detector_name is not None else det_cfg["name"]
+
     source = Path(source_path)
     output = Path(output_path)
 
@@ -117,12 +140,12 @@ def run_video_tracking(
 
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading detector: {weights_path} (device: {device})...")
+    print(f"Loading detector [{detector_key}]: {resolved_weights} (device: {device})...")
     detector = UltralyticsDetectorAdapter(
-        weights_path=weights_path,
+        weights_path=resolved_weights,
         conf_threshold=conf_threshold,
         device=device,
-        detector_name=detector_name,
+        detector_name=resolved_name,
     )
 
     print(f"Initializing ByteTracker (high_th={high_threshold}, low_th={low_threshold}, max_lost={max_lost}, min_hits={min_hits})...")
@@ -263,7 +286,11 @@ def run_video_tracking(
                 if prev_state == TrackState.COASTING and trk.state == TrackState.TRACKED:
                     gaps_bridged += 1
 
-                if trk.current_detection.target_class == TargetClass.SWIMMER:
+                if trk.current_detection.target_class in (
+                    TargetClass.SWIMMER,
+                    TargetClass.PERSON,
+                    TargetClass.PERSON_SURFACE,
+                ):
                     has_swimmer = True
 
             if has_swimmer:
@@ -295,7 +322,11 @@ def run_video_tracking(
     avg_total_ms = sum(frame_latencies_ms) / len(frame_latencies_ms) if frame_latencies_ms else 0.0
 
     # Class breakdown of tracked targets
-    swimmer_tracks = [tid for tid, cls in track_classes.items() if cls == TargetClass.SWIMMER]
+    swimmer_tracks = [
+        tid
+        for tid, cls in track_classes.items()
+        if cls in (TargetClass.SWIMMER, TargetClass.PERSON, TargetClass.PERSON_SURFACE)
+    ]
     watercraft_tracks = [tid for tid, cls in track_classes.items() if cls == TargetClass.WATERCRAFT]
 
     print("\n" + "=" * 60)
@@ -392,10 +423,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run sequential spatial detection, ByteTrack tracking, and temporal behavior analysis on an aerial video")
     parser.add_argument("--source", type=str, required=True, help="Path to input video file")
     parser.add_argument("--output", type=str, default="runs/m5/tracking.mp4", help="Path to save output video")
-    parser.add_argument("--weights", type=str, default="models/seadronessee-yolov8n.pt", help="Path to model weights")
+    parser.add_argument(
+        "--detector",
+        type=str,
+        default="seadronessee",
+        choices=list(SUPPORTED_DETECTORS.keys()),
+        help="Explicit detector selection (seadronessee, yolo11n)",
+    )
+    parser.add_argument("--weights", type=str, default=None, help="Optional custom path to model weights")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, mps, cpu, cuda)")
-    parser.add_argument("--name", type=str, default="seadronessee_yolov8n", help="Detector label")
+    parser.add_argument("--name", type=str, default=None, help="Optional custom detector label")
     parser.add_argument("--high-thresh", type=float, default=0.4, help="ByteTrack high confidence threshold")
     parser.add_argument("--low-thresh", type=float, default=0.1, help="ByteTrack low confidence threshold")
     parser.add_argument("--match-thresh", type=float, default=0.8, help="ByteTrack match distance threshold (1 - IoU)")
@@ -420,6 +458,7 @@ def main() -> int:
         conf_threshold=args.conf,
         device=args.device,
         detector_name=args.name,
+        detector=args.detector,
         high_threshold=args.high_thresh,
         low_threshold=args.low_thresh,
         match_threshold_high=args.match_thresh,

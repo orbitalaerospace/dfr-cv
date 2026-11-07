@@ -67,7 +67,7 @@ def probe_pytorch() -> Dict[str, Any]:
 
 
 def probe_optional_packages() -> Dict[str, str]:
-    packages = ["pydantic", "cv2", "ultralytics", "numpy", "pytest"]
+    packages = ["pydantic", "numpy", "cv2", "ultralytics", "scipy", "pytest"]
     results = {}
     for pkg in packages:
         try:
@@ -116,11 +116,28 @@ def main() -> int:
     for name, ver in pkg_info.items():
         print(f"  {name:<14}: {ver}")
 
+    # Determine readiness across pipeline capability tiers
+    has_core = pkg_info.get("pydantic") != "not installed" and pkg_info.get("numpy") != "not installed"
+    has_ml = torch_info["installed"] and pkg_info.get("ultralytics") != "not installed" and pkg_info.get("cv2") != "not installed"
+    has_tracking = pkg_info.get("scipy") != "not installed"
+    has_tests = pkg_info.get("pytest") != "not installed"
+
+    print("\n[Perception Pipeline Capability Tiers]")
+    print(f"  Tier 1: Foundation Data Contracts (Pydantic V2) : {'READY' if has_core else 'MISSING DEPENDENCIES'}")
+    print(f"  Tier 2: Spatial Object Detectors (Torch/YOLO)     : {'READY' if has_ml else 'MISSING DEPENDENCIES'}")
+    print(f"  Tier 3: Multi-Object Tracking (ByteTrack/Kalman)  : {'READY' if (has_core and has_tracking) else 'MISSING DEPENDENCIES'}")
+    print(f"  Tier 4: Test & Validation Harness (pytest)       : {'READY' if has_tests else 'MISSING DEPENDENCIES'}")
+
+    all_ready = has_core and has_ml and has_tracking and has_tests
+
     print("\n" + "=" * 60)
-    print(" Verification Status: READY FOR MILESTONE 1 EXECUTION")
+    if all_ready:
+        print(" Verification Status: ENVIRONMENT READY FOR END-TO-END PIPELINE")
+    else:
+        print(" Verification Status: INCOMPLETE (Install missing packages above)")
     print("=" * 60)
 
-    return 0
+    return 0 if all_ready else 1
 
 
 if __name__ == "__main__":

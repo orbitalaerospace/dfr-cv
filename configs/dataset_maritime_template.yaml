@@ -1,0 +1,34 @@
+# Maritime Search and Rescue Dataset Configuration Template (YOLO Format)
+# Maps to canonical ontology in src.domain.enums.TargetClass
+
+# Root dataset directory path (relative to repo root or absolute)
+path: data/processed/dfr-maritime-v1.0.0
+
+# Split definitions (MUST be sequence-independent partitions by flight sortie)
+train: images/train
+val: images/val
+test: images/test
+
+# -----------------------------------------------------------------------------
+# ONTOLOGY CONFIGURATION
+# -----------------------------------------------------------------------------
+# NOTE: The current pre-trained checkpoint (models/seadronessee-yolov8n.pt) uses
+# native SeaDronesSee v2 classes:
+#   {0: 'swimmer', 1: 'boat', 2: 'jetski', 3: 'life_saving_appliances', 4: 'buoy'}
+#
+# Below is the provisional multi-class maritime candidate configuration (nc: 6).
+# If adopting the unified spatial detection recommendation (where 'floater' vs
+# 'swimmer' is delegated to temporal behavior classification to prevent ByteTrack
+# class-flip track fragmentation), merge classes 0 & 1 into 'swimmer' / 'person_surface'.
+# -----------------------------------------------------------------------------
+
+nc: 6
+
+names:
+  0: swimmer
+  1: floater
+  2: life_jacket
+  3: life_saving_appliance
+  4: watercraft
+  5: buoy
+

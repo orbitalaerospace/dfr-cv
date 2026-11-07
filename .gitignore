@@ -30,6 +30,12 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv/
+
+# Testing and caching
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
 # Environment variables
 .env
@@ -43,10 +49,34 @@ venv.bak/
 # macOS
 .DS_Store
 
-# Datasets / weights / outputs
-data/
-runs/
+# Datasets and Media Assets
+data/samples/
+data/external_test/
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/metadata/*
+!data/metadata/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+
+# Media binaries
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.tar.gz
+*.zip
+
+# Model checkpoints and engines
 models/*.pt
 models/*.onnx
 models/*.engine
 weights/
+
+# Generated Runs and Benchmarks
+runs/*
+!runs/README.md

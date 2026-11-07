@@ -1,0 +1,31 @@
+# Training Hyperparameter Reference for Aerial Maritime Object Detection
+# Optimized for small-object sensitivity and multi-scale swimmer perception
+
+task: detect
+mode: train
+
+# Model architecture & input
+model: models/yolo11n.pt       # Pretrained base backbone
+imgsz: 640                     # Input resolution (evaluate 640 and 1280)
+epochs: 100
+batch: 16
+patience: 30                   # Early stopping patience
+
+# Optimization
+optimizer: AdamW
+lr0: 0.001
+lrf: 0.01                      # Final learning rate fraction (lr0 * lrf)
+weight_decay: 0.0005
+warmup_epochs: 3.0
+
+# Multi-scale and Aerial Augmentations
+mosaic: 1.0                    # Mosaic augmentation (combines 4 images, good for context)
+scale: 0.5                     # Image scale jitter (+/- 50%) to bridge close vs distant swimmers
+fliplr: 0.5                    # Horizontal flip probability
+flipud: 0.2                    # Vertical flip probability (drones observe from varying headings)
+hsv_h: 0.015                   # HSV hue jitter
+hsv_s: 0.4                     # HSV saturation jitter (simulates varying water tones)
+hsv_v: 0.3                     # HSV value/brightness jitter (simulates solar illumination changes)
+degrees: 15.0                  # Rotation augmentation (simulates drone yaw angles)
+erasing: 0.2                   # Random erasing / cutout (simulates wave occlusion)
+
